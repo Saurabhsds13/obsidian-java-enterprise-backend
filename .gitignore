@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# OS metadata
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# IDE / editor temporary files
+# ---------------------------------------------------------------------------
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# Java build output (for any embedded code samples / projects)
+# ---------------------------------------------------------------------------
+target/
+build/
+out/
+bin/
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+.mvn/wrapper/maven-wrapper.jar
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log
+logs/
+
+# ---------------------------------------------------------------------------
+# Environment files & secrets — NEVER commit real secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.keystore
+secrets.*
+credentials.*
+
+# ---------------------------------------------------------------------------
+# Obsidian: keep shareable vault config, ignore machine-specific state
+# ---------------------------------------------------------------------------
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.trash/
+
+# Keep (do NOT ignore) useful shared config such as:
+#   .obsidian/app.json, .obsidian/appearance.json, .obsidian/core-plugins.json,
+#   .obsidian/hotkeys.json, .obsidian/templates.json
+
+# ---------------------------------------------------------------------------
+# Kiro agent task brief (local only, not committed)
+# ---------------------------------------------------------------------------
+Kiro Agent Task*.md
