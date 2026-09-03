@@ -10,40 +10,49 @@ tags: [java]
 # JDK vs JRE
 
 ## Definition
-- **JDK** (Java Development Kit): tools to *develop* Java — compiler (`javac`), debugger, `jar`, and the JRE.
-- **JRE** (Java Runtime Environment): everything needed to *run* Java — the [[JVM]] plus core libraries. Historically shipped separately; modern distributions bundle a runtime image.
+- **JDK** (Java Development Kit): everything needed to *develop* — compiler (`javac`), tools (`jar`, `javadoc`, `jlink`, `jcmd`, `jstack`), plus a runtime.
+- **JRE** (Java Runtime Environment): everything needed to *run* — the [[JVM]] plus the standard class library. Standalone public JREs were discontinued after Java 8/11; you now ship a JDK or a `jlink`-built custom runtime.
+- **JVM**: the execution engine inside both.
 
 ## Why it matters
-Knowing the difference clarifies what you ship to production (a runtime) versus what you build with (a full kit), and it explains base image choices in Docker.
+It clarifies what you build with vs what you ship, drives Docker base-image and image-size decisions, and is a quick "do you understand the platform layering" screen.
 
 ## How it works
-```text
-JDK = JRE + development tools (javac, jdb, jar, javadoc...)
-JRE = JVM + standard class libraries
-JVM = the execution engine
 ```
-Since Java 11, standalone public JREs were discontinued; you produce a slim runtime with `jlink`, or use a JDK base image.
+JDK = JRE + dev tools (javac, jdb, jar, javadoc, jlink, diagnostics)
+JRE = JVM + standard libraries
+JVM = bytecode execution engine (see [[JVM]])
+```
+Since Java 9's module system, `jlink` assembles a **minimal custom runtime** containing only the modules your app needs — smaller image, smaller attack surface. GraalVM `native-image` goes further, producing a standalone native binary (no JVM shipped) with fast startup, trading away JIT peak throughput and some dynamic features.
 
-## Example
+## Enterprise example — multi-stage Docker
 ```dockerfile
-# Build stage uses full JDK
+# Build with the full JDK
 FROM eclipse-temurin:21-jdk AS build
-# Runtime stage uses a smaller runtime image
-FROM eclipse-temurin:21-jre
-```
+COPY . . 
+RUN ./mvnw -q package
 
-## Production usage
-CI/build agents need the JDK; runtime containers can use a JRE or a `jlink`-generated custom runtime to shrink image size and attack surface.
+# Ship a slim runtime image (JRE-class)
+FROM eclipse-temurin:21-jre
+COPY --from=build /app/target/app.jar /app.jar
+ENTRYPOINT ["java","-jar","/app.jar"]
+```
 
 ## Trade-offs
-- JRE-only images are smaller and expose fewer tools, but you can't compile on them.
+- Full JDK image: can compile/diagnose in-container, larger, bigger attack surface.
+- JRE / `jlink` runtime: smaller and safer, but can't compile and has fewer tools (harder live debugging).
+- `native-image`: fastest startup + lowest memory, but loses JIT peak throughput, needs closed-world config for reflection.
 
-## Common mistakes
-- Shipping the full JDK to production when only a runtime is needed.
+## Common mistakes (senior-level)
+- Shipping the full JDK to production when a runtime suffices (larger image, more CVEs).
+- Removing all diagnostic tools then being unable to `jstack`/`jcmd` a stuck prod pod — keep a debug sidecar or a JDK image for triage.
+- Forgetting `native-image` needs explicit reflection/resource config.
 
-## Interview questions
-- What is the difference between JDK, JRE, and JVM?
-- How do you produce a minimal Java runtime today?
+## Interview questions (staff+)
+- JDK vs JRE vs JVM — what's in each?
+- How do you produce a minimal Java runtime today (`jlink`), and why?
+- Trade-offs of GraalVM native-image vs a JVM runtime.
+- Why might you still ship a JDK image to prod?
 
 ## Related concepts
 - [[JVM]]

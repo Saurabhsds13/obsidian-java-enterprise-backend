@@ -2,7 +2,7 @@
 type: concept
 domain: java
 topic: jvm
-difficulty: medium
+difficulty: hard
 status: inbox
 tags: [java]
 ---
@@ -10,50 +10,70 @@ tags: [java]
 # JVM
 
 ## Definition
-The Java Virtual Machine is an abstract computing machine that executes Java bytecode. It provides platform independence ("write once, run anywhere"), automatic memory management, and runtime services such as JIT compilation and garbage collection.
+The Java Virtual Machine is a stack-based abstract machine that loads, verifies, and executes **bytecode**, providing platform independence, automatic memory management ([[Garbage-Collection]]), and adaptive optimization (JIT). HotSpot is the reference implementation.
 
 ## Why it matters
-The JVM is why Java code runs unchanged across operating systems, and it is the layer where performance, memory, and GC behavior are decided. Understanding it separates engineers who *use* Java from those who can *tune and debug* it in production.
+The JVM is where performance, memory footprint, startup, and GC behavior are actually decided. Architect-level candidates are expected to reason about runtime data areas, class loading, JIT tiers, and how to diagnose a misbehaving process — not just write Java.
 
-## How it works
-1. `.java` source is compiled by `javac` into `.class` files containing **bytecode**.
-2. The **class loader** loads classes into memory (see [[JDK-vs-JRE]]).
-3. Bytecode runs on the **execution engine**: initially interpreted, then hot paths are compiled to native code by the **JIT** compiler.
-4. Runtime data areas hold program state:
-   - **Heap** — objects (shared, GC-managed). See [[Garbage-Collection]].
-   - **Stack** — one per thread, holds frames with local variables.
-   - **Metaspace** — class metadata (off-heap since Java 8).
-   - **PC register** and **native method stack**.
+## How it works — the mechanism
 
-```text
-Source (.java) --javac--> Bytecode (.class) --ClassLoader--> JVM
-      Execution Engine (Interpreter + JIT) -> native CPU instructions
+### Compilation + execution pipeline
 ```
+.java --javac--> .class (bytecode) --ClassLoader--> [verify -> link -> init]
+   --> Interpreter (fast start) --profiles hot methods--> JIT (C1/C2) --> native code
+```
+- Bytecode runs on the **operand stack** (JVM is stack-based, not register-based).
+- **Interpretation first** for fast startup; the JIT compiles *hot* methods to native code guided by runtime profiles (**tiered compilation**: C1 quick/lightly-optimized → C2 aggressive). C2 does inlining, escape analysis (stack allocation / lock elision), loop unrolling, and can **deoptimize** back to the interpreter when a speculative assumption breaks.
 
-## Example
+### Runtime data areas
+| Area | Scope | Holds | OOM type |
+|------|-------|-------|----------|
+| **Heap** | shared | all objects, arrays | `OutOfMemoryError: Java heap space` |
+| **Metaspace** | shared | class metadata (off-heap, native since Java 8; replaced PermGen) | `OutOfMemoryError: Metaspace` |
+| **JVM Stack** | per thread | frames: locals, operand stack | `StackOverflowError` |
+| **PC register** | per thread | current instruction | — |
+| **Native method stack** | per thread | JNI frames | — |
+| **Code cache** | shared | JIT-compiled native code | code cache full → deopt |
+
+### Class loading (delegation model)
+- Loaders: Bootstrap → Platform → Application, with **parent-first delegation** (a loader asks its parent before loading itself) — prevents core classes being overridden and enables isolation.
+- Phases: **loading → linking (verify, prepare, resolve) → initialization** (static init, lazy on first active use).
+
+## Enterprise example — container-aware runtime flags
 ```bash
-javac PaymentService.java   # produces PaymentService.class (bytecode)
-java PaymentService         # JVM loads, verifies, and executes bytecode
+java -XX:+UseG1GC \
+     -XX:MaxRAMPercentage=75 \        # size heap relative to the container memory limit
+     -XX:MaxMetaspaceSize=256m \
+     -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps \
+     -Xlog:gc*:file=/logs/gc.log \
+     -jar app.jar
 ```
+Modern JVMs are container-aware (respect cgroup limits), but pinning `MaxRAMPercentage` and enabling heap-dump-on-OOM are production hygiene.
 
-## Production usage
-JVM flags tune heap and GC for services: `-Xms`/`-Xmx` (heap size), `-XX:+UseG1GC`, `-XX:MaxMetaspaceSize`. Heap dumps (`jmap`) and thread dumps (`jstack`) are core production debugging tools.
+## Diagnosis toolkit (know these names)
+- `jcmd <pid> GC.heap_info`, thread dump `jstack`/`jcmd Thread.print`, heap dump `jmap`/`GC.heap_dump`, live profiling **JFR** (`-XX:StartFlightRecording`) + Mission Control, async-profiler for CPU/alloc flame graphs.
+- **Heap OOM with rising post-GC live set** = leak → heap dump + Eclipse MAT dominator tree.
+- **Metaspace OOM** = classloader leak (common with hot redeploys / dynamic proxies).
 
 ## Trade-offs
-- Advantages: portability, mature GC, strong tooling and observability.
-- Disadvantages: startup/warmup cost (JIT), memory overhead vs native binaries.
-- When NOT to ignore it: latency-sensitive services need GC and warmup tuning.
+- Advantages: portability, world-class GC + JIT, deep observability.
+- Disadvantages: JIT **warmup** (cold code is interpreted — matters for latency SLOs and short-lived functions), memory overhead vs native. Mitigations: tiered compilation, AppCDS (class-data sharing), or GraalVM native-image for fast startup at the cost of peak throughput/JIT.
 
-## Common mistakes
-- Assuming `-Xmx` is the total process memory (Metaspace, thread stacks, and native buffers live outside the heap).
-- Confusing interpreter-only behavior in benchmarks with warmed-up JIT performance.
+## Common mistakes (senior-level)
+- Assuming `-Xmx` bounds total process memory (Metaspace, thread stacks ~1 MB each, direct byte buffers, and JIT code cache live outside the heap).
+- Benchmarking cold (interpreted) code and reporting it as steady-state (need warmup / JMH).
+- Ignoring container limits pre-Java 10 (JVM saw host memory, not cgroup limit → OOM-killed).
+- Confusing `StackOverflowError` (deep recursion) with heap OOM.
 
-## Interview questions
-- What are the runtime data areas of the JVM?
-- Heap vs stack vs Metaspace — what lives where?
-- What does the JIT do and when does it kick in?
+## Interview questions (staff+)
+- Enumerate the runtime data areas and which OOM each produces.
+- What does the JIT do; explain tiered compilation and deoptimization.
+- Walk class loading phases and parent-first delegation — why does delegation matter?
+- Heap vs Metaspace vs stack — what lives where, and how do you size them in a container?
+- How would you diagnose a memory leak vs an undersized heap?
 
 ## Related concepts
 - [[JDK-vs-JRE]]
 - [[Garbage-Collection]]
 - [[Java-Memory-Model]]
+- [[OutOfMemoryError]]
