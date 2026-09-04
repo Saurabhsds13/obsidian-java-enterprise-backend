@@ -10,37 +10,50 @@ tags: [system-design]
 # CAP Theorem
 
 ## Definition
-In a distributed system, during a **network Partition** you can guarantee either **Consistency** or **Availability**, not both. Without a partition, you can have both.
+In a distributed data store, during a **network partition** (P) you must choose between **Consistency** (C — every read sees the latest acknowledged write, i.e. linearizability) and **Availability** (A — every request to a non-failed node returns a non-error response). You cannot have both *while partitioned*. When there is no partition, you can have both.
 
 ## Why it matters
-CAP frames the fundamental trade-off in distributed data systems and guides database and design choices.
+CAP is the framing device for every replication/consistency decision. The nuance that separates seniors from juniors: partitions are **not optional** (real networks drop/delay packets), so the practical choice is **CP vs AP**, and the *steady-state* trade-off is captured better by **PACELC**.
 
-## How it works
-- **C** (consistency): every read sees the latest write.
-- **A** (availability): every request gets a (non-error) response.
-- **P** (partition tolerance): the system keeps working despite dropped/delayed messages between nodes.
-- Partitions are unavoidable in real networks, so the real choice under a partition is **CP** vs **AP**:
-  - **CP**: reject/timeout to stay consistent (e.g. a system requiring quorum).
-  - **AP**: keep serving, allow stale/divergent data, reconcile later ([[Eventual-Consistency]]).
+## How it works — the mechanism
+- The three properties: **C** = linearizable reads; **A** = every live node answers; **P** = system keeps operating despite dropped inter-node messages.
+- Because P is mandatory, under a partition you pick:
+  - **CP**: refuse/stall requests that can't guarantee the latest value (e.g. a system that requires a **quorum** — see below). Sacrifices availability to stay correct.
+  - **AP**: keep answering from whatever node you can reach, accept divergence, reconcile later ([[Eventual-Consistency]]).
 
-## Beyond CAP: PACELC
-PACELC extends it: **if Partition then A-vs-C, Else Latency-vs-Consistency** — even without partitions there's a latency/consistency trade-off.
+### Quorums (how CP is actually implemented)
+With N replicas, read quorum **R** and write quorum **W**: if **W + R > N**, a read set and write set always overlap → you read the latest write (strong consistency). Common: N=3, W=2, R=2. Lowering W/R raises availability/latency but risks stale reads (AP-leaning). This is the dial behind Dynamo-style stores and Kafka's `acks`/ISR.
 
-## Production usage
-Match the choice to the domain: payments lean CP for correctness; feeds/carts often lean AP for availability.
+### PACELC (the better model)
+**if Partition → A vs C, Else → Latency vs Consistency.** Even with no partition, synchronous replication for strong consistency costs latency; async replication cuts latency but allows staleness. Example classifications: a strongly-consistent SQL primary ≈ **PC/EC**; a Dynamo-style store ≈ **PA/EL**.
+
+## Enterprise example — matching the choice to the domain
+| System | Lean | Why |
+|--------|------|-----|
+| Payments / ledger | **CP** | double-spend/lost-money is unacceptable; reject under partition |
+| Shopping cart, feed, presence | **AP** | availability > perfect freshness; reconcile later |
+| Leader election / config (ZooKeeper/etcd) | **CP** | correctness of the single source of truth |
+| DNS, CDN | **AP** | must always answer; staleness tolerable |
 
 ## Trade-offs
-- CP: correctness, but reduced availability during partitions.
-- AP: availability, but temporary inconsistency.
+- **CP**: correctness during partitions, at the cost of rejected/slow requests (reduced availability).
+- **AP**: always-on and low-latency, at the cost of temporary inconsistency and conflict-resolution complexity.
+- The choice is often **per-operation**, not per-system (a bank may be CP for transfers, AP for showing marketing balances).
 
-## Common mistakes
-- Treating CAP as "pick 2 of 3" always (P is mandatory in practice).
+## Common mistakes (senior-level)
+- Treating CAP as "pick any 2 of 3" — P isn't optional in practice.
+- Claiming a system is "CA" (only possible in a single node / no network).
+- Ignoring the *no-partition* latency-vs-consistency trade-off (that's why PACELC exists).
+- Applying one global choice instead of per-operation consistency.
 
-## Interview questions
-- Explain CAP and PACELC.
-- Would you choose CP or AP for a payment system? Why?
+## Interview questions (staff+)
+- State CAP precisely, then explain why the real choice is CP vs AP.
+- How do quorums (W + R > N) give strong consistency, and what's the availability cost?
+- Explain PACELC and classify a system you know.
+- Would you make a payment system CP or AP? A shopping cart? Justify per operation.
 
 ## Related concepts
 - [[Eventual-Consistency]]
 - [[Replication]]
 - [[Scalability]]
+- [[Distributed-Locks]]
