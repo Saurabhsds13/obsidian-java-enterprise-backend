@@ -2,7 +2,7 @@
 type: concept
 domain: backend
 topic: authentication
-difficulty: medium
+difficulty: hard
 status: inbox
 tags: [backend]
 ---
@@ -10,32 +10,60 @@ tags: [backend]
 # Authentication
 
 ## Definition
-Verifying **who** a caller is — establishing identity via credentials, tokens, or federated providers.
+Verifying **who** a caller is — establishing identity via credentials, tokens, or a federated identity provider. Distinct from [[Authorization]] (what they may do), which happens after.
 
 ## Why it matters
-It's the gate before [[Authorization]]. Weak authentication is a top security risk.
+It's the gate to everything. Broken authentication (weak password storage, guessable sessions, unverified tokens) is a top breach cause. Architect depth: session vs token trade-offs, OAuth2/OIDC roles, and revocation.
 
-## How it works
-- **Session-based**: server stores a session; client holds a session cookie. Good for browser apps.
-- **Token-based ([[JWT]])**: stateless; client sends a bearer token per request.
-- **OAuth2 / OpenID Connect**: delegate identity to a provider; the app trusts issued tokens.
+## How it works — the mechanisms
+| Model | State | How | Best for |
+|-------|-------|-----|----------|
+| **Session (cookie)** | server-side session store | server issues a session id in a cookie; validated each request | browser apps, easy revocation |
+| **Token (JWT)** | stateless | signed token sent as `Authorization: Bearer` ([[JWT]]) | APIs, microservices, mobile |
+| **OAuth2 / OIDC** | delegated | app trusts tokens issued by an Identity Provider | SSO, third-party login, federation |
 
-## Production usage
-Hash passwords with BCrypt/Argon2 (never plaintext, never reversible encryption). Use short-lived access tokens + refresh tokens. Enforce MFA for sensitive actions. Store secrets in a secret manager (`YOUR_JWT_SECRET`).
+### OAuth2 vs OIDC (commonly confused)
+- **OAuth2** = *authorization* framework (delegated access via access tokens/scopes) — "let this app call the API on my behalf."
+- **OpenID Connect (OIDC)** = an *authentication* layer on top of OAuth2, adding the **ID token** (a JWT proving *who* the user is). Use OIDC for login, OAuth2 for delegated API access.
+
+### Password storage (non-negotiable)
+Store a **slow, salted hash**: bcrypt / scrypt / Argon2 (Argon2id preferred). Never plaintext, never fast hashes (MD5/SHA-256 alone — brute-forceable), never reversible encryption. The per-password salt defeats rainbow tables; the work factor defeats GPU cracking.
+
+## Enterprise example — stateless resource server (OIDC)
+```java
+@Bean
+SecurityFilterChain api(HttpSecurity http) throws Exception {
+    return http
+        .authorizeHttpRequests(a -> a.anyRequest().authenticated())
+        .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()))  // validate IdP-issued JWT
+        .sessionManagement(s -> s.sessionCreationPolicy(STATELESS))
+        .build();
+}
+```
 
 ## Trade-offs
-- Sessions: easy revocation, but stateful/harder to scale.
-- Tokens: stateless/scalable, but revocation is hard (keep short-lived).
+| | Session | Token (JWT) |
+|--|---------|-------------|
+| State | server store (or Redis) | none (self-contained) |
+| Scale | store is a dependency | trivially horizontal |
+| Revocation | easy (delete session) | **hard** (valid until expiry) → keep short-lived + refresh |
+| Size | small id | larger token per request |
 
-## Common mistakes
-- Storing passwords reversibly.
-- Long-lived tokens with no rotation.
+## Common mistakes (senior-level)
+- Storing passwords reversibly or with a fast hash (no salt/work factor).
+- Long-lived access tokens with no rotation/revocation strategy.
+- Trusting a JWT without verifying signature, `exp`, `iss`, `aud` ([[JWT]]).
+- Confusing OAuth2 (authz) with OIDC (authn) — using access tokens as proof of identity.
+- Rolling your own crypto/auth instead of a vetted library/IdP.
 
-## Interview questions
-- Session vs token authentication?
-- How do you handle token revocation?
+## Interview questions (staff+)
+- Session vs token authentication — trade-offs, especially revocation.
+- OAuth2 vs OIDC — which authenticates, which authorizes?
+- How should passwords be stored, and why bcrypt/Argon2 over SHA-256?
+- How do you revoke a stateless token?
 
 ## Related concepts
 - [[Authorization]]
 - [[JWT]]
+- [[API-Security]]
 - [[Spring-Security]]

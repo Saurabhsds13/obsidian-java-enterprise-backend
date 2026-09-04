@@ -10,37 +10,57 @@ tags: [backend]
 # Rate Limiting
 
 ## Definition
-Restricting how many requests a client may make in a time window to protect capacity and ensure fair use.
+Restricting how many requests a client may make in a time window, to protect capacity, ensure fairness, and enforce quotas/tiers. Distinct from **throttling** (slowing) and **load shedding** (dropping low-priority work under stress).
 
 ## Why it matters
-Rate limits shield services from abuse, runaway clients, and traffic spikes, and enforce quota/billing tiers.
+Rate limits shield services from abuse, runaway clients, and traffic spikes, and back billing tiers. The senior depth is in the algorithm trade-offs and making limits correct across a fleet (see [[Rate-Limiting-Design]]).
 
-## How it works
-Common algorithms:
-- **Token bucket**: tokens refill at a fixed rate; each request consumes one; allows bursts up to bucket size.
-- **Leaky bucket**: smooths output at a constant rate.
-- **Fixed / sliding window**: count requests per window; sliding window avoids boundary bursts.
+## How it works — the algorithms
+| Algorithm | Behavior | Memory | Boundary burst |
+|-----------|----------|--------|----------------|
+| Fixed window | count per wall-clock window | O(1) | yes (2× at edge) |
+| Sliding window log | timestamp per request | O(n) | no (exact) |
+| Sliding window counter | weighted prev+current window | O(1) | minimal |
+| **Token bucket** | tokens refill at rate r, capacity = burst | O(1) | allows controlled bursts |
+| Leaky bucket | queue drains at constant rate | O(1) | smooths output |
 
-```text
-Token bucket (capacity 10, refill 5/sec):
-  burst of 10 allowed, then ~5/sec sustained
+**Token bucket** is the common default: it permits short bursts (up to capacity) while enforcing a sustained rate — matching real client behavior.
+
+## Enterprise example — token bucket + 429
+```java
+if (!rateLimiter.tryAcquire(userId)) {
+    return ResponseEntity.status(429)
+        .header("Retry-After", "1")
+        .body(new ApiError("rate_limited", "Try again shortly"));
+}
 ```
+Always return **429 Too Many Requests** with **`Retry-After`** so well-behaved clients back off instead of hammering.
 
-## Production usage
-Enforce at the API gateway and/or per service. For distributed limits, keep counters in [[Redis]] (atomic `INCR`/Lua) so all instances share state. Return `429 Too Many Requests` with `Retry-After`. See [[Rate-Limiting-Design]].
+## Where to enforce (defense in depth)
+- **Edge / API gateway**: coarse global limits, cheap, first line.
+- **Per service / endpoint**: fine-grained, weighted by cost (a search endpoint costs more than a health check).
+- **Per tier**: free vs enterprise quotas.
+Distributed enforcement needs shared, atomic counters — see [[Rate-Limiting-Design]] and [[Redis]].
 
 ## Trade-offs
-- Per-node limits are simple but inaccurate at scale; shared (Redis) limits are accurate but add a dependency.
+- Protects the service but rejects legitimate bursts if too tight; too loose and it doesn't protect.
+- Per-node limits are simple but wrong at scale (N× the intended limit) → distributed counter adds a dependency.
 
-## Common mistakes
+## Common mistakes (senior-level)
 - Per-instance limits assumed to be global.
-- No `Retry-After`, so clients hammer harder.
+- No `Retry-After` → clients retry aggressively (compounds the problem with [[Retry]]).
+- Fixed windows allowing 2× bursts at the boundary.
+- Rate limiting by IP only (breaks behind NAT/proxies; use API key/user + IP).
+- Not differentiating endpoint cost (one limit for cheap and expensive calls).
 
-## Interview questions
-- How would you design a distributed rate limiter? (see [[How-would-you-design-a-distributed-rate-limiter]])
-- Token bucket vs sliding window?
+## Interview questions (staff+)
+- Token bucket vs sliding window vs fixed window — trade-offs.
+- Why 429 + Retry-After, and how does it interact with client retries?
+- Where do you enforce limits (edge vs service), and why both?
+- How do you make limits correct across many instances? ([[Rate-Limiting-Design]])
 
 ## Related concepts
-- [[Redis]]
 - [[Rate-Limiting-Design]]
+- [[Redis]]
 - [[Circuit-Breaker]]
+- [[Retry]]
